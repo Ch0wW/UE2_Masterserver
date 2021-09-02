@@ -1,116 +1,107 @@
 package main
 
 import (
-	"bufio"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net"
 	"time"
 )
 
-const (
-	SERVER_PORT    = "27900"
-	CONNECTIONTYPE = "tcp"
-)
+var ClientConnections map[*UnrealConnection]UnrealConnection
 
-var ClientConnections map[*Client]int
+type UnrealConnection struct {
+	buffer    []byte
+	bufferpos int
+	bufferlen int
 
-type ClientType int
-
-const (
-	CTYPE_UNKNOWN ClientType = iota
-	CTYPE_CLIENT
-	CTYPE_SERVER
-)
-
-type Client struct {
 	// incoming chan string
-	buf        []byte
-	reader     *bufio.Reader
-	writer     *bufio.Writer
-	conn       net.Conn
-	connection *Client
+	conn *net.TCPConn
 
-	bInitialAuth bool
-	bNeedsAuth   bool
-
-	Status     ClientStatus
-	ClientType ClientType
+	Status     ConnectionStatus
 	AnswerType SV_AnswerType
+
+	protocol *UE2_GameProtocol
 }
 
-func NewClient(connection net.Conn) *Client {
-	tmpwriter := bufio.NewWriter(connection)
-	tmpreader := bufio.NewReader(connection)
+func Client_Initialize(c *net.TCPConn) (*UnrealConnection, error) {
 
-	// Set the buffersize to 1024
-	writer := bufio.NewWriterSize(tmpwriter, 1024)
-	reader := bufio.NewReaderSize(tmpreader, 1024)
+	err := c.SetReadDeadline(time.Now().Add(1 * time.Second))
 
-	connection.SetReadDeadline(time.Now().Add(1 * time.Second))
+	if err != nil {
+		return nil, err
+	}
 
-	client := &Client{
+	client := &UnrealConnection{
 		// incoming: make(chan string),
-		buf:    make([]byte, 1024),
-		conn:   connection,
-		reader: reader,
-		writer: writer,
+		buffer: make([]byte, 1024),
+		conn:   c,
 
-		bInitialAuth: true,
-		Status:       CTMS_NEEDSAUTH,
-		AnswerType:   MSTC_UNKNOWN,
-		ClientType:   CTYPE_UNKNOWN,
+		Status: CTMS_NEEDSAUTH,
+
+		protocol: &UE2_GameProtocol{
+			protocol:   Protocol(PROTOCOL_NONE),
+			clienttype: CTYPE_UNKNOWN,
+		},
+		//AnswerType: MSTC_UNKNOWN,
+		//ClientType: CTYPE_UNKNOWN,
 	}
 
 	client.Listen()
 
-	return client
+	return client, nil
 }
 
-func (client *Client) Listen() {
+func (cl *UnrealConnection) Listen() {
 
 	// Initial Sending of challenge
-	client.SendInitialChallenge()
+	err := cl.SendInitialChallenge()
+
+	if err != nil {
+		cl.CloseConnection()
+	}
 
 	// Handle the connection
-	go client.HandleConnection()
+	go cl.HandleConnection()
 }
 
-func (client *Client) CloseConnection() {
+func (client *UnrealConnection) CloseConnection() {
 	client.conn.Close()
 	delete(ClientConnections, client)
-	if client.connection != nil {
-		client.connection.connection = nil
+	if client.conn != nil {
+		client.conn = nil
 	}
 	client = nil
 
 	fmt.Println("CLOSED CONNECTION")
 }
 
-func (client *Client) HandleConnection() {
-	for {
+func (client *UnrealConnection) HandleConnection() {
 
+	for {
 		// Stop it whenever the client disconnected.
 		if client.Status == CTMS_TERMINATED {
 			break
 		}
 
 		buffer := make([]byte, 1024)
-		bufsize, _ := client.reader.Read(buffer)
+		bufsize, _ := client.conn.Read(buffer)
 
 		if bufsize <= 0 {
 			//fmt.Println("server has no data to answer with")
 			continue
 		}
 
-		client.buf = buffer[0:bufsize]
+		// Skip the 4 first bytes. They have no purpose at all other
+		// than indicating the size of the packet request.
+		client.buffer = buffer[4:bufsize]
+		client.bufferlen = bufsize
+		client.bufferpos = 0
 
 		// Printing Hex dump of bytes for debugging
-		fmt.Println(hex.Dump(client.buf))
+		fmt.Println(hex.Dump(client.buffer))
 
-		client.ReadChallenge(client.buf, bufsize)
-		client.ReadMOTDChallenge(client.buf)
-		client.Authentication_WriteData()
+		client.ReadMessage()
 	}
 
 	client.CloseConnection()
@@ -122,22 +113,33 @@ func main() {
 	fmt.Println(" Unreal Engine 2.X Masterserver")
 	fmt.Println("=======================")
 
-	ClientConnections = make(map[*Client]int)
-	listener, _ := net.Listen("tcp", ":"+SERVER_PORT)
+	BotConfig_Init()
+
+	sAddr, err := net.ResolveTCPAddr("tcp", ":27900")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	listener, _ := net.ListenTCP("tcp", sAddr)
 	for {
-		conn, err := listener.Accept()
+		conn, err := listener.AcceptTCP()
 		if err != nil {
-			fmt.Println("ERROR: ", err.Error())
+			fmt.Println(err)
 		}
-		client := NewClient(conn)
+
+		// Initialize client structure
+		client, err := Client_Initialize(conn)
+		if err != nil {
+			fmt.Println(err)
+		}
+
 		for clientList, _ := range ClientConnections {
-			if clientList.connection == nil {
-				client.connection = clientList
-				clientList.connection = client
+			if clientList.conn == nil {
+				client.conn = conn
 				fmt.Println("Connected")
 			}
 		}
-		ClientConnections[client] = 1
+
 		fmt.Println("New size of clients:", len(ClientConnections))
 	}
 
