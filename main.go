@@ -8,110 +8,113 @@ import (
 	"time"
 )
 
-var ClientConnections map[*UnrealConnection]UnrealConnection
+var ServerList *[]UnrealServerData
+
+type UnrealServerData struct {
+	IP               *net.IP
+	Port             uint16
+	QueryPort        uint16
+	GameSpyQueryPort uint16
+}
+
+var ConnectionList *[]UnrealConnection
+
+var debugmode = true
+
+type ServerUDPRequest struct {
+	Code             uint32
+	GamePort         uint16
+	GameQueryPort    uint16
+	GameSpyQueryPort uint16
+}
 
 type UnrealConnection struct {
 	buffer    []byte
 	bufferpos int
 	bufferlen int
 
+	UT2K4_userVerified bool
+
 	// incoming chan string
-	conn *net.TCPConn
+	conn    *net.TCPConn
+	udpconn *net.UDPConn
 
 	Status     ConnectionStatus
 	AnswerType SV_AnswerType
 
-	protocol *UE2_GameProtocol
+	Protocol *UE2_GameProtocol
+
+	SV_UDPInfo *ServerUDPRequest
 }
 
-func Client_Initialize(c *net.TCPConn) (*UnrealConnection, error) {
-
-	err := c.SetReadDeadline(time.Now().Add(1 * time.Second))
-
-	if err != nil {
-		return nil, err
-	}
+func Client_HandleConnection(co *net.TCPConn) {
 
 	client := &UnrealConnection{
-		// incoming: make(chan string),
-		buffer: make([]byte, 1024),
-		conn:   c,
-
+		conn:   co,
 		Status: CTMS_NEEDSAUTH,
 
-		protocol: &UE2_GameProtocol{
+		Protocol: &UE2_GameProtocol{
 			protocol:   Protocol(PROTOCOL_NONE),
 			clienttype: CTYPE_UNKNOWN,
+			language:   "int",
 		},
-		//AnswerType: MSTC_UNKNOWN,
-		//ClientType: CTYPE_UNKNOWN,
 	}
 
-	client.Listen()
-
-	return client, nil
-}
-
-func (cl *UnrealConnection) Listen() {
-
-	// Initial Sending of challenge
-	err := cl.SendInitialChallenge()
-
+	// Server always does the first step...
+	err := client.SendInitialChallenge()
 	if err != nil {
-		cl.CloseConnection()
+		co.Close()
+		return
 	}
 
-	// Handle the connection
-	go cl.HandleConnection()
-}
-
-func (client *UnrealConnection) CloseConnection() {
-	client.conn.Close()
-	delete(ClientConnections, client)
-	if client.conn != nil {
-		client.conn = nil
-	}
-	client = nil
-
-	fmt.Println("CLOSED CONNECTION")
-}
-
-func (client *UnrealConnection) HandleConnection() {
-
+	// Then, loop our connection...
 	for {
-		// Stop it whenever the client disconnected.
-		if client.Status == CTMS_TERMINATED {
+		err := co.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+		if err != nil {
 			break
 		}
 
-		buffer := make([]byte, 1024)
-		bufsize, _ := client.conn.Read(buffer)
+		defsize := 4
 
-		if bufsize <= 0 {
-			//fmt.Println("server has no data to answer with")
-			continue
+		buffer := make([]byte, 1024)
+		size, err := co.Read(buffer)
+		if err != nil {
+			break
 		}
 
-		// Skip the 4 first bytes. They have no purpose at all other
-		// than indicating the size of the packet request.
-		client.buffer = buffer[4:bufsize]
-		client.bufferlen = bufsize
+		newbuf := buffer[defsize:size]
+
+		if debugmode {
+			//fmt.Println(size, newbuf)
+		}
+
+		client.buffer = newbuf
+		client.bufferlen = size - defsize
 		client.bufferpos = 0
 
-		// Printing Hex dump of bytes for debugging
-		fmt.Println(hex.Dump(client.buffer))
+		fmt.Println(hex.Dump(newbuf))
 
-		client.ReadMessage()
+		// Process the message and check if something goes wrong...
+		err = client.ReadMessage()
+		if err != nil {
+			break
+		}
 	}
 
-	client.CloseConnection()
+	// Safely close the connection
+	fmt.Println("Connection closed...")
+	co.Close()
 }
 
 func main() {
 
 	fmt.Println("=======================")
 	fmt.Println(" Unreal Engine 2.X Masterserver")
+	fmt.Println(" Version 0.1a by Ch0wW")
 	fmt.Println("=======================")
+
+	go UDP_main()
 
 	BotConfig_Init()
 
@@ -121,26 +124,73 @@ func main() {
 	}
 
 	listener, _ := net.ListenTCP("tcp", sAddr)
+	defer listener.Close()
 	for {
 		conn, err := listener.AcceptTCP()
 		if err != nil {
 			fmt.Println(err)
+			conn.Close()
 		}
 
+		fmt.Println("Client connected")
+		go Client_HandleConnection(conn)
 		// Initialize client structure
-		client, err := Client_Initialize(conn)
+	}
+}
+
+func UDP_main() {
+	sAddr, err := net.ResolveUDPAddr("udp", ":27900")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	conn, err := net.ListenUDP("udp", sAddr)
+	conn.SetReadBuffer(1048576)
+	if err != nil {
+		// handle error
+	}
+	defer conn.Close()
+
+	var buf [1024]byte
+	for {
+		rlen, remote, err := conn.ReadFromUDP(buf[:])
+
 		if err != nil {
-			fmt.Println(err)
+			panic(err)
 		}
 
-		for clientList, _ := range ClientConnections {
-			if clientList.conn == nil {
-				client.conn = conn
-				fmt.Println("Connected")
-			}
+		if debugmode {
+			fmt.Println(rlen, remote, buf[:rlen])
 		}
 
-		fmt.Println("New size of clients:", len(ClientConnections))
+		// Do stuff with the read bytes
+		go UDP_HandleConnection(conn, remote, buf, rlen)
+	}
+
+}
+
+func UDP_HandleConnection(co *net.UDPConn, addr *net.UDPAddr, buffer [1024]byte, rlen int) {
+
+	c := &UnrealConnection{
+		udpconn: co,
+	}
+
+	_, err := c.ReadLong()
+	if err != nil {
+		fmt.Println("Unknown code read...")
+		return
+	}
+
+	porttype, err := c.ReadByte()
+	if err != nil {
+		fmt.Println("Unable to read port type #", porttype)
+		return
+	}
+
+	code, err := c.ReadLong()
+	if err != nil {
+		fmt.Println("Unable to read code", porttype)
+		return
 	}
 
 }

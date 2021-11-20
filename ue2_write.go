@@ -13,8 +13,7 @@ func (cl *UnrealConnection) SendInitialChallenge() error {
 	cmdlen := cl.GetStringLength(cmd)
 
 	var buf bytes.Buffer
-	buf.WriteByte(cmdlen) // Size of Buffer
-	buf = cl.WritePayload(buf)
+	buf = cl.WriteCommandSize(buf, cmdlen) // Size of command buffer
 	buf = cl.WriteString(buf, cmd)
 
 	fmt.Println(hex.Dump(buf.Bytes()))
@@ -30,13 +29,13 @@ func (cl *UnrealConnection) SendInitialChallenge() error {
 }
 
 func (cl *UnrealConnection) DenyAccess() error {
-	fmt.Println("DENYING ACCESS TO")
+	fmt.Println("DENYING ACCESS TO", cl.conn.RemoteAddr().String())
+
 	cmd := "DENIED"
 	cmdlen := cl.GetStringLength(cmd)
 
 	var buf bytes.Buffer
-	buf.WriteByte(cmdlen) // Size of Buffer
-	buf = cl.WritePayload(buf)
+	buf = cl.WriteCommandSize(buf, cmdlen) // Size of command buffer
 	buf = cl.WriteString(buf, cmd)
 	_, err := cl.conn.Write(buf.Bytes())
 
@@ -50,11 +49,37 @@ func (cl *UnrealConnection) AllowAccess() error {
 	fmt.Println("APPROVING CLIENT", cl.conn.RemoteAddr().String())
 
 	cmd := "APPROVED"
-	cmdlen := byte(len(cmd)) + 2
+	cmdlen := uint32(len(cmd)) + 2
 
 	var buf bytes.Buffer
-	buf.WriteByte(cmdlen) // Size of Buffer
-	buf = cl.WritePayload(buf)
+	buf = cl.WriteCommandSize(buf, cmdlen) // Size of command buffer
+	buf = cl.WriteString(buf, cmd)
+
+	fmt.Println(hex.Dump(buf.Bytes()))
+	_, err := cl.conn.Write(buf.Bytes())
+
+	if err != nil {
+		return errors.New("Cannot send approving access.")
+	}
+
+	cl.Status = CTMS_LOGGED
+
+	// Since the next logical state of Unreal Engine 2.X seems to be the UDP queries...
+	if cl.Protocol.clienttype == CTYPE_SERVER {
+		cl.Status = CTMS_UDPAUTHREQUEST
+	}
+
+	return nil
+}
+
+func (cl *UnrealConnection) SendVerifiedMSG() error {
+	fmt.Println("Verifying CLIENT", cl.conn.RemoteAddr().String())
+
+	cmd := "VERIFIED"
+	cmdlen := uint32(len(cmd)) + 2
+
+	var buf bytes.Buffer
+	buf = cl.WriteCommandSize(buf, cmdlen) // Size of command buffer
 	buf = cl.WriteString(buf, cmd)
 
 	fmt.Println(hex.Dump(buf.Bytes()))
@@ -71,18 +96,23 @@ func (cl *UnrealConnection) AllowAccess() error {
 
 func (cl *UnrealConnection) SendMOTD() error {
 
-	fmt.Println("SENDING MOTD")
-	//	msg := "HELLO EVERYONE HOW ARE YOU DOINGAAA\nAAAA\nAAAAAAAAA\naasfsdf\nsf\n"
-	msg := "HELLO\n"
-
 	var premsg, buf bytes.Buffer
+	fmt.Println("SENDING MOTD")
 
-	//premsg.WriteByte(byte(len(msg)))
-	premsg = cl.WriteStringNoText(premsg, msg)
-	premsg.Write([]byte{00, 00, 00})
+	// MSGLINE ()
+	msgline1 := "This is an Unreal Engine 2.X PoC"
 
-	buf.WriteByte(byte(len(premsg.Bytes())))
-	buf = cl.WritePayload(buf)
+	// Forge the MOTD
+	premsg = cl.WriteStringNoText(premsg, msgline1)
+	/*premsg.Write([]byte{0x0a, 0x0d})
+	premsg = cl.WriteStringNoText(premsg, msgline2)*/
+	premsg.Write([]byte{00, 00, 00, 00, 00})
+
+	// Get the full message size for later...
+	lenmsg := uint32(len(premsg.Bytes()))
+
+	// Okay, forge the packet.
+	buf = cl.WriteCommandSize(buf, lenmsg)
 	buf.Write(premsg.Bytes())
 	fmt.Println(hex.Dump(buf.Bytes()))
 

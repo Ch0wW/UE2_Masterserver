@@ -20,6 +20,7 @@ const (
 type UE2_GameProtocol struct {
 	protocol   Protocol
 	clienttype ClientType
+	language   string
 }
 
 func PROTOCOL_Init() {
