@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 )
@@ -170,4 +171,57 @@ func (cl *UnrealConnection) Parse_PariahGameInfo() (*ServerInfo, error) {
 	fmt.Println(sv)
 
 	return sv, nil
+}
+
+func (cl *UnrealConnection) Parse_PariahServerList() error {
+
+	check, err := cl.ReadByte()
+	if err != nil {
+		return err
+	}
+	if check != 0 {
+		return fmt.Errorf("unknown masterserver challenge code (got %d)", check)
+	}
+
+	// Check length
+	packetlen := cl.bufferlen - cl.bufferpos
+
+	// Packet is empty, give all servers
+	if packetlen == 1 {
+		// return a test package
+	}
+
+	/*	arguments, err := cl.ReadByte()
+		if err != nil {
+			return err
+		}
+
+		for */
+
+	var pkt UnrealPacket
+
+	pkt.WriteInt(1) // amount of servers
+
+	// Example of how 1 server is handled
+	pkt.WriteByte(1)                   // ServerID (MUST BE > 0 !!!!)
+	pkt.WriteByte(127)                 // IP A
+	pkt.WriteByte(0)                   // IP B
+	pkt.WriteByte(0)                   // IP C
+	pkt.WriteByte(1)                   // IP D
+	pkt.WriteShort(7777)               // 7897 // GAME PORT
+	pkt.WriteShort(7778)               // 7898 // QUERY PORT
+	pkt.WriteString("HELLO WORLD FFS") // SERVERNAME
+	pkt.WriteString("DM-Grind")        // MAPNAME
+	pkt.WriteString("xDeathMatch")     // Gamemode
+	pkt.WriteByte(0)                   // Players
+	pkt.WriteByte(8)                   // Maxplayers
+
+	fmt.Println(hex.Dump(pkt.ExportToBytes()))
+	_, err = cl.conn.Write(pkt.ExportToBytes())
+
+	if err != nil {
+		return fmt.Errorf("can't send servers to client %s", cl.conn.RemoteAddr().String())
+	}
+
+	return nil
 }

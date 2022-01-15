@@ -8,6 +8,12 @@ import (
 	"fmt"
 )
 
+const (
+	MOTD_OK               = 0
+	MOTD_UPGRADEMANDATORY = 1
+	MOTD_UPGRADEOPTIONAL  = 2
+)
+
 func (cl *UnrealConnection) SendSimpleString(text string) error {
 	var pkt UnrealPacket
 	pkt.WriteString(text)
@@ -42,27 +48,39 @@ func (cl *UnrealConnection) SendVerifiedMSG() error {
 
 func (cl *UnrealConnection) SendMOTD() error {
 
-	var premsg, buf bytes.Buffer
 	fmt.Println("SENDING MOTD TO CLIENT")
 
 	// MSGLINE ()
-	msgline1 := "Bonjour Epic Games! Ici Ch0wW."
 
+	var pkt UnrealPacket
+
+	pkt.WriteString("This is a Masterserver PoC. Expect many issues!!!!!!!!!!")
+	pkt.WriteInt(0)
+	pkt.WriteString("  https://baseq.fr")
+	pkt.WriteInt(0)
+	pkt.WriteString("Thanks for it! Ch0wW - ")
+	pkt.WriteInt(0)
+	pkt.WriteString("  I am working really hard to make sure this is working as best as possible...")
+
+	/*pkt.WriteByte(MOTD_UPGRADEOPTIONAL)
+	pkt.WriteInt(928)*/
+	/*pkt.WriteByte(0)
+	pkt.WriteByte()*/
 	// Forge the MOTD
-	premsg = cl.WriteStringNoText(premsg, msgline1)
+	/*premsg = cl.WriteStringNoText(premsg)
 	/*premsg.Write([]byte{0x0a, 0x0d})
 	premsg = cl.WriteStringNoText(premsg, msgline2)*/
-	premsg.Write([]byte{00, 00, 00, 00, 00})
+	//premsg.Write([]byte{01, 00, 00, 00, 00})
 
 	// Get the full message size for later...
-	lenmsg := uint32(len(premsg.Bytes()))
+	/*lenmsg := uint32(len(premsg.Bytes()))
 
 	// Okay, forge the packet.
 	buf = cl.WriteCommandSize(buf, lenmsg)
 	buf.Write(premsg.Bytes())
-	fmt.Println(hex.Dump(buf.Bytes()))
+	fmt.Println(hex.Dump(buf.Bytes()))*/
 
-	_, err := cl.conn.Write(buf.Bytes())
+	_, err := cl.conn.Write(pkt.ExportToBytes())
 
 	if err != nil {
 		return errors.New("unable to send MOTD message")
@@ -96,6 +114,13 @@ func (pkt *UnrealPacket) WriteInt(packetsize uint32) {
 
 	b := make([]byte, 4)
 	binary.LittleEndian.PutUint32(b, packetsize)
+	pkt.buf.Write(b)
+}
+
+func (pkt *UnrealPacket) WriteShort(packetsize uint16) {
+
+	b := make([]byte, 2)
+	binary.LittleEndian.PutUint16(b, packetsize)
 	pkt.buf.Write(b)
 }
 

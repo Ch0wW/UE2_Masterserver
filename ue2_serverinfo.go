@@ -20,7 +20,7 @@ func (msg *UnrealConnection) Server_GetUDPPortRequest() error {
 
 	_, err := msg.ReadLong()
 	if err != nil {
-		return errors.New("Unknown value ONE")
+		return errors.New("unknown value ONE")
 	}
 
 	gamespy, err := msg.ReadLong()

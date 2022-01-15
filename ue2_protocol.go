@@ -3,8 +3,8 @@ package main
 type Protocol int
 
 const (
-	PROTOCOL_NONE int = iota
-	PROTOCOL_PARIAH
+	PROTOCOL_NONE   int = iota
+	PROTOCOL_PARIAH     // Pariah and Warpath shares the EXACT SAME code.
 	PROTOCOL_GENERIC
 	PROTOCOL_UT2KX
 )

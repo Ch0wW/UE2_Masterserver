@@ -191,12 +191,25 @@ func (cl *UnrealConnection) ReadMessage() error {
 		return nil
 	}
 
-	// CLIENT ONLY
-	if buflen == 1 {
-		return cl.ProcessMOTDRequest() // Checking if there's a MOTD
-	} else if buflen == 34 && cl.Status == CTMS_NEEDSVERIFICATION {
+	// CLIENT ONLY...
+	if cl.Status == CTMS_LOGGED {
+		if buflen == 1 {
+			return cl.ProcessMOTDRequest() // Checking if there's a MOTD
+		} else {
+			return cl.ProcessServerList()
+		}
+	} else if cl.Status == CTMS_NEEDSVERIFICATION && buflen == 34 {
 		return cl.ProcessKeyVerification() // Checking if it's another (unknown) hash
 	}
 
 	return nil
+}
+
+func (cl *UnrealConnection) ProcessServerList() error {
+
+	if cl.Protocol.protocol == Protocol(PROTOCOL_PARIAH) {
+		return cl.Parse_PariahServerList()
+	}
+
+	return errors.New("unknown game requested")
 }

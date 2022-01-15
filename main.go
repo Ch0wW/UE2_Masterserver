@@ -80,6 +80,7 @@ func Client_HandleConnection(co *net.TCPConn) {
 		buffer := make([]byte, 1024)
 		size, err := co.Read(buffer)
 		if err != nil {
+			fmt.Println("error:", err)
 			break
 		}
 
