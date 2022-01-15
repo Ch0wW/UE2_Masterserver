@@ -5,45 +5,98 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net"
+	"time"
 )
 
 func (msg *UnrealConnection) Server_GetUDPPortRequest() error {
+
+	var CODE_FAILURE byte = 0
+	var CODE_SUCCESS byte = 1
+
+	var QUERY_QUERYPORT byte = 0
+	var QUERY_GAMEPORT byte = 1
+	var QUERY_GAMESPYPORT byte = 2
 
 	_, err := msg.ReadLong()
 	if err != nil {
 		return errors.New("Unknown value One")
 	}
 
-	_, err = msg.ReadLong()
+	gamespy, err := msg.ReadLong()
 	if err != nil {
 		fmt.Println(err)
-		return errors.New("Unknown value Two")
+		return errors.New("Unknown value for gamespy")
 	}
 
-	var buf bytes.Buffer
 	msg.SV_UDPInfo.Code = uint32(rand.Intn((10000 - 1) + 1)) // Challenge key...
 
+	server := &UnrealServerData{
+		IP:               msg.conn.RemoteAddr().(*net.TCPAddr).IP,
+		Code:             msg.SV_UDPInfo.Code,
+		Port:             0,
+		QueryPort:        0,
+		GameSpyQueryPort: 0,
+	}
+
+	ServerList = append(ServerList, server)
+
 	// Send UDP queries data...
-	buf.Write([]byte{06, 00, 00, 00})
-	buf.WriteByte(0)
-	buf.WriteByte(0)
-	buf = msg.WriteCommandSize(buf, msg.SV_UDPInfo.Code)
+	var pkt UnrealPacket
+	var buf bytes.Buffer
 
-	buf.Write([]byte{06, 00, 00, 00})
-	buf.WriteByte(0)
-	buf.WriteByte(1)
-	buf = msg.WriteCommandSize(buf, msg.SV_UDPInfo.Code)
+	pkt.WriteByte(CODE_FAILURE)
+	pkt.WriteByte(QUERY_QUERYPORT)
+	pkt.WriteInt(msg.SV_UDPInfo.Code)
+	buf.Write(pkt.ExportToBytes())
 
-	// Basically Gamespy died but... Yeah, "in case of"?
-	buf.Write([]byte{06, 00, 00, 00})
-	buf.WriteByte(0)
-	buf.WriteByte(2)
-	buf = msg.WriteCommandSize(buf, msg.SV_UDPInfo.Code)
+	pkt.Reset()
+	pkt.WriteByte(CODE_FAILURE)
+	pkt.WriteByte(QUERY_GAMEPORT)
+	pkt.WriteInt(msg.SV_UDPInfo.Code)
+	buf.Write(pkt.ExportToBytes())
+
+	if gamespy == 1 {
+		pkt.Reset()
+		pkt.WriteByte(CODE_FAILURE)
+		pkt.WriteByte(QUERY_GAMESPYPORT)
+		pkt.WriteInt(msg.SV_UDPInfo.Code)
+		buf.Write(pkt.ExportToBytes())
+	}
 
 	_, err = msg.conn.Write(buf.Bytes())
 
 	if err != nil {
 		return errors.New("Cannot send it.")
+	}
+
+	// Wait to get our info...
+	time.Sleep(3 * time.Second)
+
+	for a := 0; a < len(ServerList); a++ {
+
+		sv := ServerList[a]
+
+		if sv.IP.Equal(msg.conn.RemoteAddr().(*net.TCPAddr).IP) {
+			if sv.Code == msg.SV_UDPInfo.Code {
+				var pkt UnrealPacket
+				pkt.WriteByte(CODE_SUCCESS)                   // Success!
+				pkt.WriteInt(uint32(botConfig.HeartBeatTime)) // Configured by the config
+				pkt.WriteInt(uint32(sv.QueryPort))
+				pkt.WriteInt(uint32(sv.Port))
+				pkt.WriteInt(uint32(sv.GameSpyQueryPort))
+
+				if debugmode {
+					fmt.Println("Sending............", pkt.ExportToBytes())
+				}
+
+				_, err = msg.conn.Write(pkt.ExportToBytes())
+				if err != nil {
+					return errors.New("Cannot send it.")
+				}
+			}
+		}
+
 	}
 
 	msg.Status = CTMS_SERVAUTH02
@@ -58,18 +111,17 @@ func (msg *UnrealConnection) Server_GetServerInfoRequest() error {
 	}
 
 	switch bytecmd {
-	case 3:
+	case 4:
 
-		var buf bytes.Buffer
-		buf.Write([]byte{04, 00, 00, 00})
-		buf.Write([]byte{04, 00, 00, 00})
+		var pkt UnrealPacket
+		pkt.buf.WriteByte(3) // MTS_MatchID
+		pkt.WriteInt(1)      // ToDo : ADD MatchID !!!
+		fmt.Println("Sending", pkt.ExportToBytes())
 
-		fmt.Println("Sending", buf.Bytes())
-
-		_, err = msg.conn.Write(buf.Bytes())
+		_, err = msg.conn.Write(pkt.ExportToBytes())
 
 		if err != nil {
-			return errors.New("Cannot send it.")
+			return errors.New("cannot send it")
 		}
 	}
 

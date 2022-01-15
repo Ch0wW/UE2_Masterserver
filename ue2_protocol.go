@@ -5,7 +5,7 @@ type Protocol int
 const (
 	PROTOCOL_NONE int = iota
 	PROTOCOL_PARIAH
-	PROTOCOL_LOTD
+	PROTOCOL_GENERIC
 	PROTOCOL_UT2KX
 )
 

@@ -8,13 +8,17 @@ import (
 	"time"
 )
 
-var ServerList *[]UnrealServerData
+var ServerList []*UnrealServerData
 
 type UnrealServerData struct {
-	IP               *net.IP
+	Code             uint32
+	IP               net.IP
 	Port             uint16
 	QueryPort        uint16
 	GameSpyQueryPort uint16
+	MatchID          uint16 // What is this? Taken from UE2 Console
+
+	ServerInfo []string
 }
 
 var ConnectionList *[]UnrealConnection
@@ -36,8 +40,10 @@ type UnrealConnection struct {
 	UT2K4_userVerified bool
 
 	// incoming chan string
-	conn    *net.TCPConn
+	conn *net.TCPConn
+
 	udpconn *net.UDPConn
+	udpaddr *net.UDPAddr
 
 	Status     ConnectionStatus
 	AnswerType SV_AnswerType
@@ -61,7 +67,7 @@ func Client_HandleConnection(co *net.TCPConn) {
 	}
 
 	// Server always does the first step...
-	err := client.SendInitialChallenge()
+	err := client.SendSimpleString("0") // 0 is the challenge code!
 	if err != nil {
 		co.Close()
 		return
@@ -69,12 +75,6 @@ func Client_HandleConnection(co *net.TCPConn) {
 
 	// Then, loop our connection...
 	for {
-		err := co.SetReadDeadline(time.Now().Add(60 * time.Second))
-
-		if err != nil {
-			break
-		}
-
 		defsize := 4
 
 		buffer := make([]byte, 1024)
@@ -93,6 +93,7 @@ func Client_HandleConnection(co *net.TCPConn) {
 		client.bufferlen = size - defsize
 		client.bufferpos = 0
 
+		fmt.Println(time.Now().Format(time.Stamp))
 		fmt.Println(hex.Dump(newbuf))
 
 		// Process the message and check if something goes wrong...
@@ -111,14 +112,15 @@ func main() {
 
 	fmt.Println("=======================")
 	fmt.Println(" Unreal Engine 2.X Masterserver")
-	fmt.Println(" Version 0.1a by Ch0wW")
+	fmt.Println(" Version 0.2a by Ch0wW")
 	fmt.Println("=======================")
-
-	go UDP_main()
 
 	BotConfig_Init()
 
-	sAddr, err := net.ResolveTCPAddr("tcp", ":27900")
+	go UDP_main()
+
+	fmt.Println("Opening TCP", botConfig.MasterServerPort)
+	sAddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", botConfig.MasterServerPort))
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -139,7 +141,8 @@ func main() {
 }
 
 func UDP_main() {
-	sAddr, err := net.ResolveUDPAddr("udp", ":27900")
+	fmt.Println("Opening UDP", botConfig.MasterServerPort)
+	sAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", botConfig.MasterServerPort))
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -148,6 +151,7 @@ func UDP_main() {
 	conn.SetReadBuffer(1048576)
 	if err != nil {
 		// handle error
+		fmt.Println("UDP ERROR:", err)
 	}
 	defer conn.Close()
 
@@ -172,7 +176,11 @@ func UDP_main() {
 func UDP_HandleConnection(co *net.UDPConn, addr *net.UDPAddr, buffer [1024]byte, rlen int) {
 
 	c := &UnrealConnection{
-		udpconn: co,
+		udpconn:   co,
+		udpaddr:   addr,
+		buffer:    buffer[:],
+		bufferpos: 0,
+		bufferlen: rlen,
 	}
 
 	_, err := c.ReadLong()
@@ -189,8 +197,32 @@ func UDP_HandleConnection(co *net.UDPConn, addr *net.UDPAddr, buffer [1024]byte,
 
 	code, err := c.ReadLong()
 	if err != nil {
-		fmt.Println("Unable to read code", porttype)
+		fmt.Println("unable to read code", code)
 		return
+	}
+
+	fmt.Println("SIZE OF SERVERLIST ISSSSSSSSSSSSSSSSSSSSSSS", len(ServerList))
+	// Iterate our list...
+	for i := 0; i < len(ServerList); i++ {
+
+		sv := ServerList[i]
+		fmt.Println(addr.IP, "/", sv.IP)
+		if addr.IP.Equal(sv.IP) {
+
+			if sv.Code == uint32(code) {
+				switch porttype {
+				case 0:
+					sv.QueryPort = uint16(addr.Port)
+					fmt.Println("QUERY PORT is", sv.QueryPort)
+				case 1:
+					sv.Port = uint16(addr.Port)
+					fmt.Println("GAME PORT is", sv.Port)
+				case 2:
+					sv.GameSpyQueryPort = uint16(addr.Port)
+					fmt.Println("GAMESPY PORT is", sv.GameSpyQueryPort)
+				}
+			}
+		}
 	}
 
 }

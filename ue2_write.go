@@ -2,93 +2,39 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 )
 
-func (cl *UnrealConnection) SendInitialChallenge() error {
+func (cl *UnrealConnection) SendSimpleString(text string) error {
+	var pkt UnrealPacket
+	pkt.WriteString(text)
 
-	cmd := "0"
-	cmdlen := cl.GetStringLength(cmd)
-
-	var buf bytes.Buffer
-	buf = cl.WriteCommandSize(buf, cmdlen) // Size of command buffer
-	buf = cl.WriteString(buf, cmd)
-
-	fmt.Println(hex.Dump(buf.Bytes()))
-	_, err := cl.conn.Write(buf.Bytes())
-
-	if err != nil {
-		return errors.New("Can't send initial challenge.")
+	if debugmode {
+		fmt.Println("Sending", text, "string packet to client", cl.conn.RemoteAddr().String())
+		fmt.Println(hex.Dump(pkt.ExportToBytes()))
 	}
 
-	//cl.Status = CTMS_WAITING
-
-	return nil
-}
-
-func (cl *UnrealConnection) DenyAccess() error {
-	fmt.Println("DENYING ACCESS TO", cl.conn.RemoteAddr().String())
-
-	cmd := "DENIED"
-	cmdlen := cl.GetStringLength(cmd)
-
-	var buf bytes.Buffer
-	buf = cl.WriteCommandSize(buf, cmdlen) // Size of command buffer
-	buf = cl.WriteString(buf, cmd)
-	_, err := cl.conn.Write(buf.Bytes())
+	fmt.Println(hex.Dump(pkt.ExportToBytes()))
+	_, err := cl.conn.Write(pkt.ExportToBytes())
 
 	if err != nil {
-		return errors.New("Cannot send it.")
-	}
-	return nil
-}
-
-func (cl *UnrealConnection) AllowAccess() error {
-	fmt.Println("APPROVING CLIENT", cl.conn.RemoteAddr().String())
-
-	cmd := "APPROVED"
-	cmdlen := uint32(len(cmd)) + 2
-
-	var buf bytes.Buffer
-	buf = cl.WriteCommandSize(buf, cmdlen) // Size of command buffer
-	buf = cl.WriteString(buf, cmd)
-
-	fmt.Println(hex.Dump(buf.Bytes()))
-	_, err := cl.conn.Write(buf.Bytes())
-
-	if err != nil {
-		return errors.New("Cannot send approving access.")
-	}
-
-	cl.Status = CTMS_LOGGED
-
-	// Since the next logical state of Unreal Engine 2.X seems to be the UDP queries...
-	if cl.Protocol.clienttype == CTYPE_SERVER {
-		cl.Status = CTMS_UDPAUTHREQUEST
+		return fmt.Errorf("can't send message %s to client %s", text, cl.conn.RemoteAddr().String())
 	}
 
 	return nil
 }
 
 func (cl *UnrealConnection) SendVerifiedMSG() error {
-	fmt.Println("Verifying CLIENT", cl.conn.RemoteAddr().String())
 
-	cmd := "VERIFIED"
-	cmdlen := uint32(len(cmd)) + 2
-
-	var buf bytes.Buffer
-	buf = cl.WriteCommandSize(buf, cmdlen) // Size of command buffer
-	buf = cl.WriteString(buf, cmd)
-
-	fmt.Println(hex.Dump(buf.Bytes()))
-	_, err := cl.conn.Write(buf.Bytes())
-
+	err := cl.SendSimpleString("VERIFIED")
 	if err != nil {
-		return errors.New("Cannot send approving access.")
+		return err
 	}
 
+	// Should validate the client
 	cl.Status = CTMS_LOGGED
 
 	return nil
@@ -97,10 +43,10 @@ func (cl *UnrealConnection) SendVerifiedMSG() error {
 func (cl *UnrealConnection) SendMOTD() error {
 
 	var premsg, buf bytes.Buffer
-	fmt.Println("SENDING MOTD")
+	fmt.Println("SENDING MOTD TO CLIENT")
 
 	// MSGLINE ()
-	msgline1 := "This is an Unreal Engine 2.X PoC"
+	msgline1 := "Bonjour Epic Games! Ici Ch0wW."
 
 	// Forge the MOTD
 	premsg = cl.WriteStringNoText(premsg, msgline1)
@@ -141,3 +87,54 @@ func (cl *UnrealConnection) SendMOTD() error {
 NOTOK
 00000000  0d 00 00 00 05 48 45 4c  4c 4f 00 00 00 00        |.....HELLO....|
 */
+
+type UnrealPacket struct {
+	buf bytes.Buffer // Buffer to send
+}
+
+func (pkt *UnrealPacket) WriteInt(packetsize uint32) {
+
+	b := make([]byte, 4)
+	binary.LittleEndian.PutUint32(b, packetsize)
+	pkt.buf.Write(b)
+}
+
+func (pkt *UnrealPacket) WriteString(cmd string) {
+	pkt.buf.WriteByte(byte(len(cmd)) + 1)
+	pkt.buf.Write([]byte(cmd))
+	pkt.buf.WriteByte(0)
+}
+
+func (pkt *UnrealPacket) WriteByte(c byte) error {
+
+	err := pkt.buf.WriteByte(c)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (pkt *UnrealPacket) Write(c []byte) (int, error) {
+
+	n, err := pkt.buf.Write(c)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (pkt *UnrealPacket) ExportToBytes() []byte {
+
+	var retval UnrealPacket
+
+	size := len(pkt.buf.Bytes())
+	retval.WriteInt(uint32(size))
+
+	retval.buf.Write(pkt.buf.Bytes())
+
+	return retval.buf.Bytes()
+}
+
+func (pkt *UnrealPacket) Reset() {
+	pkt.buf.Reset()
+}

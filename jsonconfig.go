@@ -12,14 +12,12 @@ var (
 )
 
 type LatestVersion struct {
-	/*DOOM3  LatestVersionDetails `json:"doom3"`
-	DHEWM3 LatestVersionDetails `json:"dhewm3"`
-	QUAKE4 LatestVersionDetails `json:"quake4"`
-	PREY   LatestVersionDetails `json:"prey"`*/
 }
 
 type Config struct {
-	Games LatestVersion `json:"gameinfo"`
+	Games            LatestVersion `json:"gameinfo"`
+	HeartBeatTime    uint16        `json:"heartbeat_time"`
+	MasterServerPort uint16        `json:"masterserver_port"`
 }
 
 func BotConfig_Init() {

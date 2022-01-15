@@ -108,7 +108,6 @@ func (sv *UnrealConnection) ReadString() (string, error) {
 		result = result + string(c)
 	}
 
-	fmt.Println("Size of String:", strsize-1, "==>", result)
 	return result, nil
 }
 

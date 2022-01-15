@@ -11,9 +11,10 @@ const (
 	CTMS_NEEDSAUTH ConnectionStatus = iota
 	CTMS_WAITING
 	CTMS_TERMINATED
+	CTMS_NEEDSVERIFICATION
 	CTMS_LOGGED
 
-	CTMS_UDPAUTHREQUEST // Servers only, to auth with the masterserver
+	SVTMS_UDPAUTHREQUEST // Servers only, to auth with the masterserver
 	CTMS_SERVAUTH02
 )
 
@@ -38,6 +39,11 @@ func (cl *UnrealConnection) SetGameType(val string) {
 	case "PARIAHSERVER":
 		cl.Protocol.protocol = Protocol(PROTOCOL_PARIAH)
 		cl.Protocol.clienttype = CTYPE_SERVER
+		break
+	case "SERVER":
+		cl.Protocol.protocol = Protocol(PROTOCOL_GENERIC)
+		cl.Protocol.clienttype = CTYPE_SERVER
+		break
 	}
 
 }
@@ -48,21 +54,21 @@ func (cl *UnrealConnection) ProcessAuthMessage() error {
 	_, err := cl.ReadString()
 	if err != nil {
 		fmt.Println(err)
-		return errors.New("Unable to read CDKey")
+		return errors.New("unable to read CDKey")
 	}
 
 	// Unknown
 	_, err = cl.ReadString()
 	if err != nil {
 		fmt.Println(err)
-		return errors.New("Unable to read Unknown Value #1")
+		return errors.New("unable to read Unknown Value #1")
 	}
 
 	// GameType
 	Gametype, err := cl.ReadString()
 	if err != nil {
 		fmt.Println(err)
-		return errors.New("Unable to read Gametype")
+		return errors.New("unable to read Gametype")
 	}
 	cl.SetGameType(Gametype)
 
@@ -70,7 +76,7 @@ func (cl *UnrealConnection) ProcessAuthMessage() error {
 	GameVersion, err := cl.ReadLong()
 	if err != nil {
 		fmt.Println(err)
-		return errors.New("Unable to read GameVersion")
+		return errors.New("unable to read GameVersion")
 	}
 	fmt.Println("Game version is", GameVersion)
 
@@ -78,7 +84,7 @@ func (cl *UnrealConnection) ProcessAuthMessage() error {
 	_, err = cl.ReadByte()
 	if err != nil {
 		fmt.Println(err)
-		return errors.New("Unable to read Platform")
+		return errors.New("unable to read Platform")
 	}
 
 	if cl.Protocol.clienttype == CTYPE_SERVER {
@@ -86,7 +92,7 @@ func (cl *UnrealConnection) ProcessAuthMessage() error {
 		_, err = cl.ReadLong()
 		if err != nil {
 			fmt.Println(err)
-			return errors.New("Unable to read Server Unknown Value ")
+			return errors.New("unable to read Server Unknown Value ")
 		}
 
 		// Initialize the serverinfo code...
@@ -101,7 +107,7 @@ func (cl *UnrealConnection) ProcessAuthMessage() error {
 	lang, err := cl.ReadString()
 	if err != nil {
 		fmt.Println(err)
-		return errors.New("Unable to read Language value")
+		return errors.New("unable to read Language value")
 	}
 	cl.Protocol.language = lang
 
@@ -120,10 +126,10 @@ func (cl *UnrealConnection) ProcessMOTDRequest() error {
 	if recvbyte == 1 {
 		err := cl.SendMOTD()
 		if err != nil {
-			return errors.New("Unable to send MOTD message...")
+			return errors.New("unable to send MOTD message")
 		}
 	} else {
-		return errors.New("Unknown byte sent by the client...")
+		return fmt.Errorf("unknown single byte %d sent by the client", recvbyte)
 	}
 
 	return nil
@@ -142,16 +148,31 @@ func (cl *UnrealConnection) ReadMessage() error {
 
 		err := cl.ProcessAuthMessage()
 		if err != nil {
-			err = cl.DenyAccess()
+			err = cl.SendSimpleString("DENIED")
 			if err != nil {
 				return errors.New("Client seems invalid, AND cannot send deny message... Great!")
 			}
 			return errors.New("Client message looks invalid")
 		}
 
-		err = cl.AllowAccess()
+		err = cl.SendSimpleString("APPROVED")
 		if err != nil {
-			return errors.New("Unable to send Allowing Access")
+			return errors.New("unable to send A Access")
+		}
+
+		cl.Status = CTMS_LOGGED
+
+		// ToDo: Check if verified flag
+		// If we're having a game that requires the validation code... Let's do it
+		if cl.Protocol.protocol == Protocol(PROTOCOL_UT2KX) {
+			cl.Status = CTMS_NEEDSVERIFICATION
+		} else {
+			cl.Status = CTMS_LOGGED
+		}
+
+		// Since the next logical state of Unreal Engine 2.X seems to be the UDP queries...
+		if cl.Protocol.clienttype == CTYPE_SERVER {
+			cl.Status = SVTMS_UDPAUTHREQUEST
 		}
 
 		return nil
@@ -161,16 +182,19 @@ func (cl *UnrealConnection) ReadMessage() error {
 
 	if cl.Protocol.clienttype == CTYPE_SERVER {
 
-		if cl.Status == CTMS_UDPAUTHREQUEST {
+		if cl.Status == SVTMS_UDPAUTHREQUEST {
 			return cl.Server_GetUDPPortRequest()
 		} else if cl.Status == CTMS_SERVAUTH02 {
 			return cl.Server_GetServerInfoRequest()
-		}
+		} //else if cl.Status == SVTMS
+
+		return nil
 	}
 
+	// CLIENT ONLY
 	if buflen == 1 {
 		return cl.ProcessMOTDRequest() // Checking if there's a MOTD
-	} else if buflen == 34 {
+	} else if buflen == 34 && cl.Status == CTMS_NEEDSVERIFICATION {
 		return cl.ProcessKeyVerification() // Checking if it's another (unknown) hash
 	}
 
