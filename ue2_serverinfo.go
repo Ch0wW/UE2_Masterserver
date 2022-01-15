@@ -20,13 +20,13 @@ func (msg *UnrealConnection) Server_GetUDPPortRequest() error {
 
 	_, err := msg.ReadLong()
 	if err != nil {
-		return errors.New("Unknown value One")
+		return errors.New("Unknown value ONE")
 	}
 
 	gamespy, err := msg.ReadLong()
 	if err != nil {
 		fmt.Println(err)
-		return errors.New("Unknown value for gamespy")
+		return fmt.Errorf("unknown value received for gamespy: %s", err)
 	}
 
 	msg.SV_UDPInfo.Code = uint32(rand.Intn((10000 - 1) + 1)) // Challenge key...
@@ -67,7 +67,7 @@ func (msg *UnrealConnection) Server_GetUDPPortRequest() error {
 	_, err = msg.conn.Write(buf.Bytes())
 
 	if err != nil {
-		return errors.New("Cannot send it.")
+		return errors.New("unable to send query ports")
 	}
 
 	// Wait to get our info...
@@ -92,7 +92,7 @@ func (msg *UnrealConnection) Server_GetUDPPortRequest() error {
 
 				_, err = msg.conn.Write(pkt.ExportToBytes())
 				if err != nil {
-					return errors.New("Cannot send it.")
+					return errors.New("unable to send query status message")
 				}
 			}
 		}
@@ -107,7 +107,7 @@ func (msg *UnrealConnection) Server_GetServerInfoRequest() error {
 
 	bytecmd, err := msg.ReadByte()
 	if err != nil {
-		return errors.New("Unknown value One")
+		return errors.New("unknown value ONE (ServerInfoRequest)")
 	}
 
 	switch bytecmd {
@@ -124,6 +124,8 @@ func (msg *UnrealConnection) Server_GetServerInfoRequest() error {
 			return errors.New("cannot send it")
 		}
 	}
+
+	msg.Status = SVTMS_PROCESSQUERYMESSAGE
 
 	return nil
 }

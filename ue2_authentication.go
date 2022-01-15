@@ -16,6 +16,7 @@ const (
 
 	SVTMS_UDPAUTHREQUEST // Servers only, to auth with the masterserver
 	CTMS_SERVAUTH02
+	SVTMS_PROCESSQUERYMESSAGE
 )
 
 type SV_AnswerType int
@@ -35,15 +36,13 @@ func (cl *UnrealConnection) SetGameType(val string) {
 	case "PARIAHCLIENT":
 		cl.Protocol.protocol = Protocol(PROTOCOL_PARIAH)
 		cl.Protocol.clienttype = CTYPE_CLIENT
-		break
 	case "PARIAHSERVER":
 		cl.Protocol.protocol = Protocol(PROTOCOL_PARIAH)
 		cl.Protocol.clienttype = CTYPE_SERVER
-		break
 	case "SERVER":
+		// ToDo: we'll have to do something as several games use this
 		cl.Protocol.protocol = Protocol(PROTOCOL_GENERIC)
 		cl.Protocol.clienttype = CTYPE_SERVER
-		break
 	}
 
 }
@@ -122,7 +121,6 @@ func (cl *UnrealConnection) ProcessMOTDRequest() error {
 		return err
 	}
 
-	//
 	if recvbyte == 1 {
 		err := cl.SendMOTD()
 		if err != nil {
@@ -150,14 +148,14 @@ func (cl *UnrealConnection) ReadMessage() error {
 		if err != nil {
 			err = cl.SendSimpleString("DENIED")
 			if err != nil {
-				return errors.New("Client seems invalid, AND cannot send deny message... Great!")
+				return errors.New("this is truly problematic if the server can't even send this DENIED packet")
 			}
-			return errors.New("Client message looks invalid")
+			return errors.New("client message looks invalid")
 		}
 
 		err = cl.SendSimpleString("APPROVED")
 		if err != nil {
-			return errors.New("unable to send A Access")
+			return errors.New("unable to send APPROVED message")
 		}
 
 		cl.Status = CTMS_LOGGED
@@ -186,7 +184,9 @@ func (cl *UnrealConnection) ReadMessage() error {
 			return cl.Server_GetUDPPortRequest()
 		} else if cl.Status == CTMS_SERVAUTH02 {
 			return cl.Server_GetServerInfoRequest()
-		} //else if cl.Status == SVTMS
+		} else if cl.Status == SVTMS_PROCESSQUERYMESSAGE {
+			cl.Parse_PariahGameInfo()
+		}
 
 		return nil
 	}

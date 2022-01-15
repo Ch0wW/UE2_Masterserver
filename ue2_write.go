@@ -65,7 +65,7 @@ func (cl *UnrealConnection) SendMOTD() error {
 	_, err := cl.conn.Write(buf.Bytes())
 
 	if err != nil {
-		return errors.New("Cannot send it.")
+		return errors.New("unable to send MOTD message")
 	}
 
 	return nil

@@ -51,7 +51,7 @@ func (sv *UnrealConnection) ReadUShort() uint16 {
 func (sv *UnrealConnection) ReadULong() (uint32, error) {
 
 	if sv.bufferpos+4 > sv.bufferlen {
-		return 0, errors.New("Buffer going too far!")
+		return 0, fmt.Errorf("buffer going too far: %d>%d", sv.bufferpos+4, sv.bufferlen)
 	}
 
 	test := binary.LittleEndian.Uint32(sv.buffer[sv.bufferpos:])
@@ -64,8 +64,7 @@ func (sv *UnrealConnection) ReadULong() (uint32, error) {
 func (sv *UnrealConnection) ReadLong() (int32, error) {
 
 	if sv.bufferpos+4 > sv.bufferlen {
-		errmsg := fmt.Sprintf("Buffer going too far! (pos: %d, size:%d)", sv.bufferpos+4, sv.bufferlen)
-		return 0, errors.New(errmsg)
+		return 0, fmt.Errorf("buffer going too far: %d>%d", sv.bufferpos+4, sv.bufferlen)
 	}
 
 	test := binary.LittleEndian.Uint32(sv.buffer[sv.bufferpos:])
